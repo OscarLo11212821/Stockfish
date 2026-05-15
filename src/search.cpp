@@ -1663,34 +1663,36 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
         if (!pos.legal(move))
             continue;
 
-        givesCheck = pos.gives_check(move);
-        capture    = pos.capture_stage(move);
+        capture = pos.capture_stage(move);
 
         moveCount++;
+
+        if (!ss->inCheck && !capture)
+            continue;
+
+        givesCheck = pos.gives_check(move);
 
         // Step 6. Pruning
         if (!is_loss(bestValue))
         {
             // Futility pruning and moveCount pruning
-            if (!givesCheck && move.to_sq() != prevSq && !is_loss(futilityBase)
-                && move.type_of() != PROMOTION)
+            if (move.to_sq() != prevSq && !is_loss(futilityBase) && move.type_of() != PROMOTION)
             {
-                if (moveCount > 2)
+                if (!givesCheck && moveCount > 2)
                     continue;
 
                 Value futilityValue = futilityBase + PieceValue[pos.piece_on(move.to_sq())];
 
                 // If static eval + value of piece we are going to capture is
                 // much lower than alpha, we can prune this move.
-                if (futilityValue <= alpha)
+                if (!givesCheck && futilityValue <= alpha)
                 {
                     bestValue = std::max(bestValue, futilityValue);
                     continue;
                 }
-
                 // If static exchange evaluation is low enough
                 // we can prune this move.
-                if (!pos.see_ge(move, alpha - futilityBase))
+                else if (!givesCheck && !pos.see_ge(move, alpha - futilityBase))
                 {
                     bestValue = std::max(bestValue, std::min(alpha, futilityBase));
                     continue;
@@ -1881,7 +1883,10 @@ void update_all_stats(const Position& pos,
     // Extra penalty for a quiet early move that was not a TT move in
     // previous ply when it gets refuted.
     if (prevSq != SQ_NONE && ((ss - 1)->moveCount == 1 + (ss - 1)->ttHit) && !pos.captured_piece())
+    {
         update_continuation_histories(ss - 1, pos.piece_on(prevSq), prevSq, -malus * 683 / 1024);
+        workerThread.mainHistory[~pos.side_to_move()][((ss - 1)->currentMove).raw()] << -malus * 338 / 1024;
+    }
 
     // Decrease stats for all non-best capture moves
     for (Move move : capturesSearched)
